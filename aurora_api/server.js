@@ -34,9 +34,104 @@ function createToken(user) {
   );
 }
 
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`user\` (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(120) NOT NULL,
+      email VARCHAR(150) NOT NULL UNIQUE,
+      password VARCHAR(255) NOT NULL,
+      googleId VARCHAR(255),
+      phone VARCHAR(40),
+      createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS product (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(150) NOT NULL,
+      description TEXT,
+      price DECIMAL(10,2) NOT NULL,
+      imageUrl TEXT,
+      brand VARCHAR(120),
+      category VARCHAR(80) NOT NULL,
+      stock INT DEFAULT 20,
+      active TINYINT(1) DEFAULT 1,
+      createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      total DECIMAL(10,2) NOT NULL,
+      payment_method VARCHAR(80) DEFAULT 'No especificado',
+      status VARCHAR(50) DEFAULT 'CONFIRMED',
+      createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES \`user\`(id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      order_id INT NOT NULL,
+      product_id INT NOT NULL,
+      product_name VARCHAR(150) NOT NULL,
+      quantity INT NOT NULL,
+      unit_price DECIMAL(10,2) NOT NULL,
+      subtotal DECIMAL(10,2) NOT NULL,
+      imageUrl TEXT,
+      FOREIGN KEY (order_id) REFERENCES orders(id),
+      FOREIGN KEY (product_id) REFERENCES product(id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS login_history (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      action VARCHAR(50) NOT NULL,
+      device VARCHAR(150),
+      createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES \`user\`(id)
+    )
+  `);
+
+  const [products] = await pool.query("SELECT COUNT(*) AS total FROM product");
+
+  if (products[0].total === 0) {
+    await pool.query(`
+      INSERT INTO product 
+      (name, description, price, imageUrl, brand, category, stock, active)
+      VALUES
+      ('Labial Matte Pro', 'Labial de alta duración con pigmentación intensa.', 40000, 'https://images.unsplash.com/photo-1586495777744-4413f21062fa', 'Aurora Beauty', 'cosmetica', 30, 1),
+
+      ('Rubor Glow', 'Rubor compacto con acabado natural y luminoso.', 50000, 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9', 'Aurora Beauty', 'cosmetica', 25, 1),
+
+      ('Base Líquida Natural', 'Base ligera para unificar el tono de la piel.', 65000, 'https://images.unsplash.com/photo-1596462502278-27bfdc403348', 'Aurora Beauty', 'cosmetica', 20, 1),
+
+      ('Pestañina Volumen', 'Máscara de pestañas para volumen y definición.', 38000, 'https://images.unsplash.com/photo-1631214524049-0ebbbe6d81aa', 'Aurora Beauty', 'cosmetica', 35, 1),
+
+      ('Crema Hidratante Facial', 'Crema diaria para hidratación y suavidad de la piel.', 35000, 'https://images.unsplash.com/photo-1556228578-8c89e6adf883', 'Aurora Care', 'cuidado', 40, 1),
+
+      ('Protector Solar SPF 50', 'Protección solar diaria para piel sensible.', 45000, 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be', 'Aurora Care', 'cuidado', 30, 1),
+
+      ('Limpiador Facial', 'Gel limpiador suave para uso diario.', 32000, 'https://images.unsplash.com/photo-1556228720-195a672e8a03', 'Aurora Care', 'cuidado', 30, 1),
+
+      ('Sérum Vitamina C', 'Sérum antioxidante para luminosidad facial.', 58000, 'https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b', 'Aurora Care', 'cuidado', 18, 1)
+    `);
+  }
+
+  console.log("Base de datos inicializada correctamente");
+}
+
 app.get("/", async (req, res) => {
   try {
     await pool.query("SELECT 1");
+
     return res.json({
       ok: true,
       message: "Aurora API funcionando correctamente",
@@ -110,6 +205,7 @@ app.post("/auth/register", async (req, res) => {
     });
   } catch (error) {
     console.error("REGISTER ERROR:", error);
+
     return res.status(500).json({
       ok: false,
       message: "Error interno registrando usuario",
@@ -176,6 +272,7 @@ app.post("/auth/login", async (req, res) => {
     });
   } catch (error) {
     console.error("LOGIN ERROR:", error);
+
     return res.status(500).json({
       ok: false,
       message: "Error interno iniciando sesión",
@@ -235,6 +332,7 @@ app.get("/products", async (req, res) => {
     });
   } catch (error) {
     console.error("PRODUCTS ERROR:", error);
+
     return res.status(500).json({
       ok: false,
       message: "Error consultando productos",
@@ -261,7 +359,10 @@ app.post("/orders", async (req, res) => {
     let total = 0;
 
     for (const item of items) {
-      total += Number(item.price) * Number(item.quantity);
+      const quantity = Number(item.quantity || 1);
+      const price = Number(item.price || 0);
+
+      total += price * quantity;
     }
 
     const [orderResult] = await connection.query(
@@ -272,16 +373,19 @@ app.post("/orders", async (req, res) => {
     const orderId = orderResult.insertId;
 
     for (const item of items) {
-      const subtotal = Number(item.price) * Number(item.quantity);
+      const productId = Number(item.id);
+      const quantity = Number(item.quantity || 1);
+      const price = Number(item.price || 0);
+      const subtotal = price * quantity;
 
       await connection.query(
         "INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal, imageUrl) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
           orderId,
-          item.id,
+          productId,
           item.name,
-          item.quantity,
-          item.price,
+          quantity,
+          price,
           subtotal,
           item.imageUrl || "",
         ]
@@ -289,7 +393,7 @@ app.post("/orders", async (req, res) => {
 
       await connection.query(
         "UPDATE product SET stock = GREATEST(stock - ?, 0) WHERE id = ?",
-        [item.quantity, item.id]
+        [quantity, productId]
       );
     }
 
@@ -303,6 +407,7 @@ app.post("/orders", async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
+
     console.error("ORDER ERROR:", error);
 
     return res.status(500).json({
@@ -330,6 +435,7 @@ app.get("/orders/user/:userId", async (req, res) => {
     });
   } catch (error) {
     console.error("USER ORDERS ERROR:", error);
+
     return res.status(500).json({
       ok: false,
       message: "Error consultando historial de compras",
@@ -366,6 +472,7 @@ app.get("/orders/:orderId", async (req, res) => {
     });
   } catch (error) {
     console.error("ORDER DETAIL ERROR:", error);
+
     return res.status(500).json({
       ok: false,
       message: "Error consultando detalle de compra",
@@ -376,6 +483,13 @@ app.get("/orders/:orderId", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Aurora API corriendo en puerto ${port}`);
-});
+initializeDatabase()
+  .then(() => {
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Aurora API corriendo en puerto ${port}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Error inicializando base de datos:", error);
+    process.exit(1);
+  });
