@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "869620085090",
+    "project_id": "aurora-beauty-app",
+    "storage_bucket": "aurora-beauty-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:869620085090:android:39866356bcf64e27853c3b",
+        "android_client_info": {
+          "package_name": "com.juandavid.aurorabeauty"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "869620085090-m4h9nf66j93mouchem2eu86mtlnuioum.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCWdAL5AYhGoznQ2M7WVab9_1cDxYnlD60"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "869620085090-m4h9nf66j93mouchem2eu86mtlnuioum.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "869620085090-61rcmopvmjm66p3k2viloijin7quhqmj.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.auroraApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

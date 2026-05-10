@@ -1,0 +1,23 @@
+# Flutter / Dart
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.packages
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# API Node
+aurora_api/node_modules/
+aurora_api/.env
+
+# IDE / sistema
+.vscode/
+.idea/
+.DS_Store
+*.iml
