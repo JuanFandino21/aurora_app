@@ -28,6 +28,7 @@ class ProductProvider extends ChangeNotifier {
 
         products = list
             .map((item) => Product.fromJson(Map<String, dynamic>.from(item)))
+            .where((product) => product.active)
             .toList();
 
         errorMessage = null;
@@ -44,9 +45,11 @@ class ProductProvider extends ChangeNotifier {
   }
 
   List<Product> byCategory(String category) {
+    final cleanCategory = category.trim().toLowerCase();
+
     return products
         .where(
-          (product) => product.category.toLowerCase() == category.toLowerCase(),
+          (product) => product.category.toLowerCase().trim() == cleanCategory,
         )
         .toList();
   }
@@ -56,13 +59,24 @@ class ProductProvider extends ChangeNotifier {
     final cleanCategory = category.trim().toLowerCase();
 
     return products.where((product) {
-      final matchesCategory = product.category.toLowerCase() == cleanCategory;
+      final matchesCategory =
+          product.category.toLowerCase().trim() == cleanCategory;
+
       final matchesSearch =
           cleanQuery.isEmpty ||
           product.name.toLowerCase().contains(cleanQuery) ||
-          product.description.toLowerCase().contains(cleanQuery);
+          product.description.toLowerCase().contains(cleanQuery) ||
+          product.brand.toLowerCase().contains(cleanQuery);
 
       return matchesCategory && matchesSearch;
     }).toList();
+  }
+
+  Product? findById(int id) {
+    try {
+      return products.firstWhere((product) => product.id == id);
+    } catch (_) {
+      return null;
+    }
   }
 }

@@ -34,10 +34,33 @@ function createToken(user) {
   );
 }
 
+function cleanText(value, maxLength = 255) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+function cleanNullableText(value, maxLength = 255) {
+  const clean = String(value || "").trim().slice(0, maxLength);
+  return clean.length > 0 ? clean : null;
+}
+
+function cleanEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isValidId(value) {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0;
+}
+
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
     String(email || "").trim().toLowerCase()
   );
+}
+
+function isValidGmail(email) {
+  const clean = cleanEmail(email);
+  return isValidEmail(clean) && clean.endsWith("@gmail.com");
 }
 
 function isValidName(name) {
@@ -50,29 +73,24 @@ function isValidPassword(password) {
   return cleanPassword.length >= 6 && cleanPassword.length <= 60;
 }
 
+function isValidIdentification(identification) {
+  if (!identification) return true;
+  const cleanIdentification = String(identification || "").trim();
+  return /^[0-9A-Za-z.-]{5,30}$/.test(cleanIdentification);
+}
+
 function isValidPhone(phone) {
   if (!phone) return true;
-  const cleanPhone = String(phone).trim();
+  const cleanPhone = String(phone || "").trim();
   return /^[0-9+\-\s()]{7,40}$/.test(cleanPhone);
 }
 
-function isValidId(value) {
-  const id = Number(value);
-  return Number.isInteger(id) && id > 0;
-}
-
-function cleanText(value, maxLength = 255) {
-  return String(value || "").trim().slice(0, maxLength);
-}
-
-function cleanEmail(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
 function cleanPaymentMethod(value) {
-  const method = String(value || "No especificado").trim();
+  const method = String(value || "Pago contra entrega").trim();
 
   const allowed = [
+    "Pago contra entrega",
+    "Contra entrega",
     "Efectivo",
     "Tarjeta",
     "Transferencia",
@@ -81,9 +99,15 @@ function cleanPaymentMethod(value) {
     "No especificado",
   ];
 
-  if (allowed.includes(method)) return method;
+  if (!allowed.includes(method)) {
+    return "Pago contra entrega";
+  }
 
-  return "No especificado";
+  if (method === "Efectivo" || method === "Contra entrega") {
+    return "Pago contra entrega";
+  }
+
+  return method;
 }
 
 function cleanTone(value) {
@@ -132,9 +156,58 @@ async function ensureColumn(tableName, columnName, definition) {
 
   if (rows.length === 0) {
     await pool.query(
-      `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`
+      `ALTER TABLE \`${tableName}\` ADD COLUMN \`${columnName}\` ${definition}`
     );
   }
+}
+
+async function normalizeEmptyValues(tableName, columnName) {
+  await pool.query(
+    `
+    UPDATE \`${tableName}\`
+    SET \`${columnName}\` = NULL
+    WHERE \`${columnName}\` = ''
+    `
+  );
+}
+
+async function ensureUniqueIndex(tableName, indexName, columnName) {
+  const [indexes] = await pool.query(
+    `
+    SELECT INDEX_NAME
+    FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ?
+      AND INDEX_NAME = ?
+    LIMIT 1
+    `,
+    [tableName, indexName]
+  );
+
+  if (indexes.length > 0) return;
+
+  const [duplicates] = await pool.query(
+    `
+    SELECT \`${columnName}\`, COUNT(*) AS total
+    FROM \`${tableName}\`
+    WHERE \`${columnName}\` IS NOT NULL
+      AND \`${columnName}\` <> ''
+    GROUP BY \`${columnName}\`
+    HAVING COUNT(*) > 1
+    LIMIT 1
+    `
+  );
+
+  if (duplicates.length > 0) {
+    console.log(
+      `No se creó índice único ${indexName} porque existen duplicados en ${columnName}`
+    );
+    return;
+  }
+
+  await pool.query(
+    `ALTER TABLE \`${tableName}\` ADD UNIQUE KEY \`${indexName}\` (\`${columnName}\`)`
+  );
 }
 
 async function initializeDatabase() {
@@ -142,10 +215,11 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS \`user\` (
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(120) NOT NULL,
+      identification VARCHAR(30) UNIQUE,
       email VARCHAR(150) NOT NULL UNIQUE,
       password VARCHAR(255) NOT NULL,
       googleId VARCHAR(255),
-      phone VARCHAR(40),
+      phone VARCHAR(40) UNIQUE,
       createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -170,7 +244,8 @@ async function initializeDatabase() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NOT NULL,
       total DECIMAL(10,2) NOT NULL,
-      payment_method VARCHAR(80) DEFAULT 'No especificado',
+      payment_method VARCHAR(80) DEFAULT 'Pago contra entrega',
+      delivery_address TEXT,
       status VARCHAR(50) DEFAULT 'CONFIRMED',
       createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES \`user\`(id)
@@ -205,10 +280,19 @@ async function initializeDatabase() {
     )
   `);
 
+  await ensureColumn("user", "identification", "VARCHAR(30)");
+  await ensureColumn("user", "phone", "VARCHAR(40)");
   await ensureColumn("product", "stock", "INT DEFAULT 20");
   await ensureColumn("product", "active", "TINYINT(1) DEFAULT 1");
+  await ensureColumn("orders", "delivery_address", "TEXT");
   await ensureColumn("order_items", "selected_tone", "VARCHAR(50)");
   await ensureColumn("order_items", "product_type", "VARCHAR(80)");
+
+  await normalizeEmptyValues("user", "identification");
+  await normalizeEmptyValues("user", "phone");
+
+  await ensureUniqueIndex("user", "uq_user_identification", "identification");
+  await ensureUniqueIndex("user", "uq_user_phone", "phone");
 
   const [products] = await pool.query("SELECT COUNT(*) AS total FROM product");
 
@@ -281,7 +365,8 @@ app.post("/auth/register", async (req, res) => {
     const cleanName = cleanText(req.body.name, 120);
     const email = cleanEmail(req.body.email);
     const password = String(req.body.password || "").trim();
-    const phone = req.body.phone ? cleanText(req.body.phone, 40) : null;
+    const identification = cleanNullableText(req.body.identification, 30);
+    const phone = cleanNullableText(req.body.phone, 40);
 
     if (!cleanName || !email || !password) {
       return res.status(400).json({
@@ -297,10 +382,10 @@ app.post("/auth/register", async (req, res) => {
       });
     }
 
-    if (!isValidEmail(email)) {
+    if (!isValidGmail(email)) {
       return res.status(400).json({
         ok: false,
-        message: "Ingresa un correo electrónico válido",
+        message: "El correo debe ser válido y terminar en @gmail.com",
       });
     }
 
@@ -311,30 +396,69 @@ app.post("/auth/register", async (req, res) => {
       });
     }
 
-    if (!isValidPhone(phone)) {
+    if (identification && !isValidIdentification(identification)) {
+      return res.status(400).json({
+        ok: false,
+        message: "La identificación debe tener entre 5 y 30 caracteres",
+      });
+    }
+
+    if (phone && !isValidPhone(phone)) {
       return res.status(400).json({
         ok: false,
         message: "Ingresa un teléfono válido",
       });
     }
 
-    const [existingUser] = await pool.query(
+    const [existingEmail] = await pool.query(
       "SELECT id FROM `user` WHERE email = ? LIMIT 1",
       [email]
     );
 
-    if (existingUser.length > 0) {
+    if (existingEmail.length > 0) {
       return res.status(409).json({
         ok: false,
         message: "Este correo ya está registrado",
       });
     }
 
+    if (identification) {
+      const [existingIdentification] = await pool.query(
+        "SELECT id FROM `user` WHERE identification = ? LIMIT 1",
+        [identification]
+      );
+
+      if (existingIdentification.length > 0) {
+        return res.status(409).json({
+          ok: false,
+          message: "Esta identificación ya está registrada",
+        });
+      }
+    }
+
+    if (phone) {
+      const [existingPhone] = await pool.query(
+        "SELECT id FROM `user` WHERE phone = ? LIMIT 1",
+        [phone]
+      );
+
+      if (existingPhone.length > 0) {
+        return res.status(409).json({
+          ok: false,
+          message: "Este teléfono ya está registrado",
+        });
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
 
     const [result] = await pool.query(
-      "INSERT INTO `user` (name, email, password, phone, googleId, createdAt) VALUES (?, ?, ?, ?, NULL, NOW())",
-      [cleanName, email, passwordHash, phone]
+      `
+      INSERT INTO \`user\`
+      (name, identification, email, password, phone, googleId, createdAt)
+      VALUES (?, ?, ?, ?, ?, NULL, NOW())
+      `,
+      [cleanName, identification, email, passwordHash, phone]
     );
 
     await pool.query(
@@ -348,6 +472,7 @@ app.post("/auth/register", async (req, res) => {
       user: {
         id: result.insertId,
         name: cleanName,
+        identification: identification || "",
         email,
         phone: phone || "",
       },
@@ -358,7 +483,7 @@ app.post("/auth/register", async (req, res) => {
     if (error.code === "ER_DUP_ENTRY") {
       return res.status(409).json({
         ok: false,
-        message: "Este correo ya está registrado",
+        message: "El correo, identificación o teléfono ya está registrado",
       });
     }
 
@@ -382,10 +507,10 @@ app.post("/auth/login", async (req, res) => {
       });
     }
 
-    if (!isValidEmail(email)) {
+    if (!isValidGmail(email)) {
       return res.status(400).json({
         ok: false,
-        message: "Ingresa un correo electrónico válido",
+        message: "El correo debe ser válido y terminar en @gmail.com",
       });
     }
 
@@ -397,7 +522,20 @@ app.post("/auth/login", async (req, res) => {
     }
 
     const [rows] = await pool.query(
-      "SELECT id, name, email, password, phone, googleId, createdAt FROM `user` WHERE email = ? LIMIT 1",
+      `
+      SELECT
+        id,
+        name,
+        identification,
+        email,
+        password,
+        phone,
+        googleId,
+        createdAt
+      FROM \`user\`
+      WHERE email = ?
+      LIMIT 1
+      `,
       [email]
     );
 
@@ -433,6 +571,7 @@ app.post("/auth/login", async (req, res) => {
       user: {
         id: dbUser.id,
         name: dbUser.name,
+        identification: dbUser.identification || "",
         email: dbUser.email,
         phone: dbUser.phone || "",
         googleId: dbUser.googleId || "",
@@ -449,11 +588,9 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
-app.put("/auth/profile/:id", async (req, res) => {
+app.get("/auth/profile/:id", async (req, res) => {
   try {
     const userId = Number(req.params.id);
-    const cleanName = cleanText(req.body.name, 120);
-    const cleanPhone = req.body.phone ? cleanText(req.body.phone, 40) : null;
 
     if (!isValidId(userId)) {
       return res.status(400).json({
@@ -462,50 +599,186 @@ app.put("/auth/profile/:id", async (req, res) => {
       });
     }
 
-    if (!isValidName(cleanName)) {
-      return res.status(400).json({
-        ok: false,
-        message: "El nombre debe tener entre 2 y 120 caracteres",
-      });
-    }
-
-    if (!isValidPhone(cleanPhone)) {
-      return res.status(400).json({
-        ok: false,
-        message: "Ingresa un teléfono válido",
-      });
-    }
-
-    const [existingUser] = await pool.query(
-      "SELECT id, email FROM `user` WHERE id = ? LIMIT 1",
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+        name,
+        identification,
+        email,
+        phone,
+        googleId,
+        createdAt
+      FROM \`user\`
+      WHERE id = ?
+      LIMIT 1
+      `,
       [userId]
     );
 
-    if (existingUser.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({
         ok: false,
         message: "Usuario no encontrado",
       });
     }
 
-    await pool.query("UPDATE `user` SET name = ?, phone = ? WHERE id = ?", [
-      cleanName,
-      cleanPhone,
-      userId,
-    ]);
+    const dbUser = rows[0];
+
+    return res.json({
+      ok: true,
+      user: {
+        id: dbUser.id,
+        name: dbUser.name,
+        identification: dbUser.identification || "",
+        email: dbUser.email,
+        phone: dbUser.phone || "",
+        googleId: dbUser.googleId || "",
+      },
+    });
+  } catch (error) {
+    console.error("GET PROFILE ERROR:", error);
+
+    return res.status(500).json({
+      ok: false,
+      message: "Error consultando perfil",
+      error: error.message,
+    });
+  }
+});
+
+app.put("/auth/profile/:id", async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+
+    if (!isValidId(userId)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Usuario inválido",
+      });
+    }
+
+    const [existingRows] = await pool.query(
+      `
+      SELECT
+        id,
+        name,
+        identification,
+        email,
+        phone
+      FROM \`user\`
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (existingRows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "Usuario no encontrado",
+      });
+    }
+
+    const currentUser = existingRows[0];
+
+    const hasName = Object.prototype.hasOwnProperty.call(req.body, "name");
+    const hasIdentification = Object.prototype.hasOwnProperty.call(
+      req.body,
+      "identification"
+    );
+    const hasPhone = Object.prototype.hasOwnProperty.call(req.body, "phone");
+
+    const nameToSave = hasName
+      ? cleanText(req.body.name, 120)
+      : currentUser.name;
+
+    const identificationToSave = hasIdentification
+      ? cleanNullableText(req.body.identification, 30)
+      : currentUser.identification || null;
+
+    const phoneToSave = hasPhone
+      ? cleanNullableText(req.body.phone, 40)
+      : currentUser.phone || null;
+
+    if (!isValidName(nameToSave)) {
+      return res.status(400).json({
+        ok: false,
+        message: "El nombre debe tener entre 2 y 120 caracteres",
+      });
+    }
+
+    if (identificationToSave && !isValidIdentification(identificationToSave)) {
+      return res.status(400).json({
+        ok: false,
+        message: "La identificación debe tener entre 5 y 30 caracteres",
+      });
+    }
+
+    if (phoneToSave && !isValidPhone(phoneToSave)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ingresa un teléfono válido",
+      });
+    }
+
+    if (identificationToSave) {
+      const [sameIdentification] = await pool.query(
+        "SELECT id FROM `user` WHERE identification = ? AND id <> ? LIMIT 1",
+        [identificationToSave, userId]
+      );
+
+      if (sameIdentification.length > 0) {
+        return res.status(409).json({
+          ok: false,
+          message: "Esta identificación ya está registrada",
+        });
+      }
+    }
+
+    if (phoneToSave) {
+      const [samePhone] = await pool.query(
+        "SELECT id FROM `user` WHERE phone = ? AND id <> ? LIMIT 1",
+        [phoneToSave, userId]
+      );
+
+      if (samePhone.length > 0) {
+        return res.status(409).json({
+          ok: false,
+          message: "Este teléfono ya está registrado",
+        });
+      }
+    }
+
+    await pool.query(
+      `
+      UPDATE \`user\`
+      SET name = ?, identification = ?, phone = ?
+      WHERE id = ?
+      `,
+      [nameToSave, identificationToSave, phoneToSave, userId]
+    );
 
     return res.json({
       ok: true,
       message: "Perfil actualizado correctamente",
       user: {
         id: userId,
-        name: cleanName,
-        email: existingUser[0].email,
-        phone: cleanPhone || "",
+        name: nameToSave,
+        identification: identificationToSave || "",
+        email: currentUser.email,
+        phone: phoneToSave || "",
       },
     });
   } catch (error) {
     console.error("UPDATE PROFILE ERROR:", error);
+
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({
+        ok: false,
+        message: "La identificación o el teléfono ya están registrados",
+      });
+    }
 
     return res.status(500).json({
       ok: false,
@@ -582,12 +855,23 @@ app.post("/orders", async (req, res) => {
   try {
     const userId = Number(req.body.userId);
     const paymentMethod = cleanPaymentMethod(req.body.paymentMethod);
+    const deliveryAddress = cleanText(
+      req.body.deliveryAddress || req.body.address,
+      255
+    );
     const items = req.body.items;
 
     if (!isValidId(userId)) {
       return res.status(400).json({
         ok: false,
         message: "Usuario inválido",
+      });
+    }
+
+    if (deliveryAddress.length < 8) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ingresa una dirección de entrega válida",
       });
     }
 
@@ -680,8 +964,12 @@ app.post("/orders", async (req, res) => {
     }
 
     const [orderResult] = await connection.query(
-      "INSERT INTO orders (user_id, total, payment_method, status, createdAt) VALUES (?, ?, ?, 'CONFIRMED', NOW())",
-      [userId, total, paymentMethod]
+      `
+      INSERT INTO orders
+      (user_id, total, payment_method, delivery_address, status, createdAt)
+      VALUES (?, ?, ?, ?, 'CONFIRMED', NOW())
+      `,
+      [userId, total, paymentMethod, deliveryAddress]
     );
 
     const orderId = orderResult.insertId;
@@ -706,19 +994,23 @@ app.post("/orders", async (req, res) => {
         ]
       );
 
-      await connection.query("UPDATE product SET stock = stock - ? WHERE id = ?", [
-        item.quantity,
-        item.productId,
-      ]);
+      await connection.query(
+        "UPDATE product SET stock = stock - ? WHERE id = ?",
+        [item.quantity, item.productId]
+      );
     }
 
     await connection.commit();
 
     return res.status(201).json({
       ok: true,
-      message: "Compra registrada correctamente",
+      message:
+        "Compra registrada correctamente. Tu pedido tardará de 1 a 4 días en llegar.",
       orderId,
       total,
+      paymentMethod,
+      deliveryAddress,
+      estimatedDelivery: "1 a 4 días",
     });
   } catch (error) {
     await connection.rollback();
@@ -745,10 +1037,70 @@ app.get("/orders/user/:userId", async (req, res) => {
       });
     }
 
-    const [orders] = await pool.query(
-      "SELECT id, user_id, total, payment_method, status, createdAt FROM orders WHERE user_id = ? ORDER BY id DESC",
+    const [ordersAsc] = await pool.query(
+      `
+      SELECT
+        id,
+        user_id,
+        total,
+        payment_method,
+        delivery_address,
+        status,
+        createdAt
+      FROM orders
+      WHERE user_id = ?
+      ORDER BY createdAt ASC, id ASC
+      `,
       [userId]
     );
+
+    if (ordersAsc.length === 0) {
+      return res.json({
+        ok: true,
+        orders: [],
+      });
+    }
+
+    const orderIds = ordersAsc.map((order) => order.id);
+    const placeholders = orderIds.map(() => "?").join(",");
+
+    const [items] = await pool.query(
+      `
+      SELECT
+        id,
+        order_id,
+        product_id,
+        product_name,
+        quantity,
+        unit_price,
+        subtotal,
+        imageUrl,
+        selected_tone,
+        product_type
+      FROM order_items
+      WHERE order_id IN (${placeholders})
+      ORDER BY id ASC
+      `,
+      orderIds
+    );
+
+    const itemsByOrder = {};
+
+    for (const item of items) {
+      if (!itemsByOrder[item.order_id]) {
+        itemsByOrder[item.order_id] = [];
+      }
+
+      itemsByOrder[item.order_id].push(item);
+    }
+
+    const orders = ordersAsc
+      .map((order, index) => ({
+        ...order,
+        user_order_number: index + 1,
+        items: itemsByOrder[order.id] || [],
+      }))
+      .reverse();
 
     return res.json({
       ok: true,
@@ -777,7 +1129,19 @@ app.get("/orders/:orderId", async (req, res) => {
     }
 
     const [orders] = await pool.query(
-      "SELECT id, user_id, total, payment_method, status, createdAt FROM orders WHERE id = ? LIMIT 1",
+      `
+      SELECT
+        id,
+        user_id,
+        total,
+        payment_method,
+        delivery_address,
+        status,
+        createdAt
+      FROM orders
+      WHERE id = ?
+      LIMIT 1
+      `,
       [orderId]
     );
 
@@ -787,6 +1151,21 @@ app.get("/orders/:orderId", async (req, res) => {
         message: "Compra no encontrada",
       });
     }
+
+    const order = orders[0];
+
+    const [numberRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS user_order_number
+      FROM orders
+      WHERE user_id = ?
+        AND (
+          createdAt < ?
+          OR (createdAt = ? AND id <= ?)
+        )
+      `,
+      [order.user_id, order.createdAt, order.createdAt, order.id]
+    );
 
     const [items] = await pool.query(
       `
@@ -803,13 +1182,17 @@ app.get("/orders/:orderId", async (req, res) => {
         product_type
       FROM order_items
       WHERE order_id = ?
+      ORDER BY id ASC
       `,
       [orderId]
     );
 
     return res.json({
       ok: true,
-      order: orders[0],
+      order: {
+        ...order,
+        user_order_number: Number(numberRows[0].user_order_number || 1),
+      },
       items,
     });
   } catch (error) {

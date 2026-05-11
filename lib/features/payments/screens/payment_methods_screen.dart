@@ -9,8 +9,38 @@ class PaymentMethodsScreen extends StatefulWidget {
 }
 
 class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
-  String method = 'Tarjeta';
+  static const String defaultMethod = 'Pago contra entrega';
+
+  String method = defaultMethod;
   bool loading = true;
+
+  final List<Map<String, String>> methods = const [
+    {
+      'value': 'Pago contra entrega',
+      'title': 'Pago contra entrega',
+      'subtitle': 'Paga cuando recibas tu pedido',
+    },
+    {
+      'value': 'Tarjeta',
+      'title': 'Tarjeta',
+      'subtitle': 'Simulación de pago con tarjeta',
+    },
+    {
+      'value': 'Transferencia',
+      'title': 'Transferencia',
+      'subtitle': 'Simulación de transferencia bancaria',
+    },
+    {
+      'value': 'Nequi',
+      'title': 'Nequi',
+      'subtitle': 'Simulación de pago móvil',
+    },
+    {
+      'value': 'Daviplata',
+      'title': 'Daviplata',
+      'subtitle': 'Simulación de billetera móvil',
+    },
+  ];
 
   @override
   void initState() {
@@ -20,21 +50,37 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+
+    final saved = prefs.getString('preferred_payment_method') ?? defaultMethod;
+
     setState(() {
-      method = prefs.getString('preferred_payment_method') ?? 'Tarjeta';
+      method = _normalizeMethod(saved);
       loading = false;
     });
   }
 
+  String _normalizeMethod(String value) {
+    if (value == 'Efectivo' || value == 'Contra entrega') {
+      return defaultMethod;
+    }
+
+    final exists = methods.any((item) => item['value'] == value);
+
+    return exists ? value : defaultMethod;
+  }
+
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.setString('preferred_payment_method', method);
 
     if (!mounted) return;
 
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Método de pago guardado')));
+    ).showSnackBar(SnackBar(content: Text('Método guardado: $method')));
+
+    Navigator.pop(context, method);
   }
 
   @override
@@ -43,6 +89,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       backgroundColor: const Color(0xFFF6E7F2),
       appBar: AppBar(
         backgroundColor: const Color(0xFFF48FB1),
+        foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('Métodos de pago'),
       ),
@@ -51,56 +98,39 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _card(
-                  child: RadioListTile<String>(
-                    value: 'Tarjeta',
-                    groupValue: method,
-                    onChanged: (value) => setState(() => method = value!),
-                    title: const Text('Tarjeta'),
-                    subtitle: const Text('Débito o crédito'),
+                const Text(
+                  'Selecciona tu método preferido',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Esta app realiza una simulación de pago para el prototipo.',
+                  style: TextStyle(color: Colors.black54, height: 1.3),
+                ),
+                const SizedBox(height: 18),
+                ...methods.map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _card(
+                      child: RadioListTile<String>(
+                        value: item['value']!,
+                        groupValue: method,
+                        activeColor: const Color(0xFFE91E63),
+                        onChanged: (value) {
+                          setState(() {
+                            method = value ?? defaultMethod;
+                          });
+                        },
+                        title: Text(
+                          item['title']!,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(item['subtitle']!),
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                _card(
-                  child: RadioListTile<String>(
-                    value: 'PSE',
-                    groupValue: method,
-                    onChanged: (value) => setState(() => method = value!),
-                    title: const Text('PSE'),
-                    subtitle: const Text('Pago por banco'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _card(
-                  child: RadioListTile<String>(
-                    value: 'Contra entrega',
-                    groupValue: method,
-                    onChanged: (value) => setState(() => method = value!),
-                    title: const Text('Contra entrega'),
-                    subtitle: const Text('Paga al recibir'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _card(
-                  child: RadioListTile<String>(
-                    value: 'Nequi',
-                    groupValue: method,
-                    onChanged: (value) => setState(() => method = value!),
-                    title: const Text('Nequi'),
-                    subtitle: const Text('Pago móvil'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _card(
-                  child: RadioListTile<String>(
-                    value: 'Daviplata',
-                    groupValue: method,
-                    onChanged: (value) => setState(() => method = value!),
-                    title: const Text('Daviplata'),
-                    subtitle: const Text('Billetera móvil'),
-                  ),
-                ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 16),
                 SizedBox(
                   height: 52,
                   child: ElevatedButton(

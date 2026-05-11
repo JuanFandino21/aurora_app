@@ -31,12 +31,14 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
   String _money(dynamic value) {
     final number = value is num
         ? value.toDouble()
-        : double.tryParse(value.toString()) ?? 0;
+        : double.tryParse(value?.toString() ?? '') ?? 0;
+
     return '\$${number.toStringAsFixed(0)}';
   }
 
   String _formatDate(dynamic value) {
     final raw = value?.toString() ?? '';
+
     if (raw.isEmpty) return '';
 
     try {
@@ -55,16 +57,94 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
     }
   }
 
+  String _statusText(dynamic value) {
+    final raw = value?.toString().toUpperCase().trim() ?? '';
+
+    if (raw == 'CONFIRMED') return 'CONFIRMADO';
+    if (raw == 'PENDING') return 'PENDIENTE';
+    if (raw == 'CANCELLED') return 'CANCELADO';
+
+    return raw.isEmpty ? 'CONFIRMADO' : raw;
+  }
+
+  int _orderNumber(Map<String, dynamic> order, int index) {
+    final fromServer = int.tryParse(
+      order['user_order_number']?.toString() ?? '',
+    );
+
+    if (fromServer != null && fromServer > 0) {
+      return fromServer;
+    }
+
+    // Fallback mientras Railway termina de desplegar el server.js nuevo.
+    // Si este usuario tiene 2 compras, la más nueva será Compra #2.
+    return orders.length - index;
+  }
+
+  Color? _toneColor(dynamic value) {
+    final raw = value?.toString().trim() ?? '';
+
+    if (raw.isEmpty || raw == 'null') return null;
+
+    try {
+      if (raw.startsWith('#')) {
+        final hex = raw.replaceFirst('#', '');
+        final parsed = int.parse(hex, radix: 16);
+
+        if (hex.length == 6) {
+          return Color(0xFF000000 | parsed);
+        }
+
+        return Color(parsed);
+      }
+
+      if (raw.startsWith('0x')) {
+        return Color(int.parse(raw));
+      }
+
+      final parsed = int.tryParse(raw);
+
+      if (parsed == null) return null;
+
+      if (parsed <= 0xFFFFFF) {
+        return Color(0xFF000000 | parsed);
+      }
+
+      return Color(parsed);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<Map<String, dynamic>> _itemsFromOrder(
+    Map<String, dynamic> order,
+    int orderId,
+  ) {
+    final directItems = order['items'];
+
+    if (directItems is List) {
+      return directItems
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+    }
+
+    return orderItemsCache[orderId] ?? [];
+  }
+
   Future<void> _loadOrders() async {
     final auth = context.read<AuthProvider>();
+
     final userId =
         auth.user?['id']?.toString() ?? auth.user?['uid']?.toString() ?? '';
 
     if (userId.isEmpty) {
+      if (!mounted) return;
+
       setState(() {
         loading = false;
         errorMessage = 'No hay usuario autenticado';
       });
+
       return;
     }
 
@@ -88,8 +168,12 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
             .toList();
 
         for (final order in loadedOrders) {
-          final orderId = int.tryParse(order['id'].toString()) ?? 0;
-          if (orderId > 0) {
+          final orderId = int.tryParse(order['id']?.toString() ?? '') ?? 0;
+
+          final hasItemsFromServer =
+              order['items'] is List && (order['items'] as List).isNotEmpty;
+
+          if (orderId > 0 && !hasItemsFromServer) {
             orderItemsCache[orderId] = await _loadOrderItems(orderId);
           }
         }
@@ -187,8 +271,14 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                 itemCount: orders.length,
                 itemBuilder: (context, index) {
                   final order = orders[index];
-                  final orderId = int.tryParse(order['id'].toString()) ?? 0;
-                  final items = orderItemsCache[orderId] ?? [];
+
+                  final orderId =
+                      int.tryParse(order['id']?.toString() ?? '') ?? 0;
+
+                  final orderNumber = _orderNumber(order, index);
+                  final items = _itemsFromOrder(order, orderId);
+                  final deliveryAddress =
+                      order['delivery_address']?.toString().trim() ?? '';
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 18),
@@ -211,7 +301,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                           children: [
                             Expanded(
                               child: Text(
-                                'Compra #$orderId',
+                                'Compra #$orderNumber',
                                 style: TextStyle(
                                   color: accessibility.textColor,
                                   fontWeight: FontWeight.bold,
@@ -252,7 +342,7 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
-                                order['status']?.toString() ?? 'CONFIRMED',
+                                _statusText(order['status']),
                                 style: TextStyle(
                                   color: accessibility.primaryColor,
                                   fontWeight: FontWeight.bold,
@@ -272,6 +362,29 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                             ),
                           ],
                         ),
+                        if (deliveryAddress.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.location_on,
+                                size: 17,
+                                color: accessibility.mutedTextColor,
+                              ),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  deliveryAddress,
+                                  style: TextStyle(
+                                    color: accessibility.mutedTextColor,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                         const SizedBox(height: 14),
                         Divider(
                           color: accessibility.mutedTextColor.withValues(
@@ -289,6 +402,17 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                         else
                           Column(
                             children: items.map((item) {
+                              final tone = _toneColor(
+                                item['selected_tone'] ??
+                                    item['tone'] ??
+                                    item['selectedTone'],
+                              );
+
+                              final productType =
+                                  item['product_type']?.toString() ??
+                                  item['productType']?.toString() ??
+                                  '';
+
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
                                 child: Row(
@@ -338,6 +462,50 @@ class _PurchaseHistoryScreenState extends State<PurchaseHistoryScreen> {
                                               fontSize: 13,
                                             ),
                                           ),
+                                          if (productType
+                                              .trim()
+                                              .isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Tipo: $productType',
+                                              style: TextStyle(
+                                                color: accessibility
+                                                    .mutedTextColor,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ],
+                                          if (tone != null) ...[
+                                            const SizedBox(height: 6),
+                                            Row(
+                                              children: [
+                                                Text(
+                                                  'Tono seleccionado',
+                                                  style: TextStyle(
+                                                    color: accessibility
+                                                        .mutedTextColor,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Container(
+                                                  width: 18,
+                                                  height: 18,
+                                                  decoration: BoxDecoration(
+                                                    color: tone,
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(
+                                                      color: accessibility
+                                                          .textColor
+                                                          .withValues(
+                                                            alpha: 0.25,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
                                         ],
                                       ),
                                     ),

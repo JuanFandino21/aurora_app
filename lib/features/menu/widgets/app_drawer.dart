@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../accessibility/provider/accessibility_provider.dart';
+import '../../auth/provider/auth_provider.dart';
 import '../../orders/screens/purchase_history_screen.dart';
 import '../../payments/screens/payment_methods_screen.dart';
 import '../../settings/screens/settings_screen.dart';
@@ -27,9 +28,54 @@ class AppDrawer extends StatelessWidget {
     required this.onLogout,
   });
 
+  String _imagePath(AuthProvider authProvider) {
+    final fromProvider = authProvider.profileImagePath?.trim() ?? '';
+    final fromUser =
+        authProvider.user?['profileImagePath']?.toString().trim() ?? '';
+    final fromParam = profileImagePath?.trim() ?? '';
+
+    final path = fromProvider.isNotEmpty
+        ? fromProvider
+        : fromUser.isNotEmpty
+        ? fromUser
+        : fromParam;
+
+    if (path.isEmpty) return '';
+
+    final file = File(path);
+
+    if (!file.existsSync()) return '';
+
+    return path;
+  }
+
   @override
   Widget build(BuildContext context) {
     final accessibility = context.watch<AccessibilityProvider>();
+    final authProvider = context.watch<AuthProvider>();
+
+    final nameFromProvider =
+        authProvider.user?['name']?.toString().trim() ?? '';
+
+    final emailFromProvider =
+        authProvider.user?['email']?.toString().trim() ?? '';
+
+    final identification =
+        authProvider.user?['identification']?.toString().trim() ?? '';
+
+    final phone = authProvider.user?['phone']?.toString().trim() ?? '';
+
+    final cleanName = nameFromProvider.isNotEmpty
+        ? nameFromProvider
+        : userName.trim().isNotEmpty
+        ? userName.trim()
+        : 'Usuario';
+
+    final cleanEmail = emailFromProvider.isNotEmpty
+        ? emailFromProvider
+        : userEmail.trim();
+
+    final imagePath = _imagePath(authProvider);
 
     return Drawer(
       backgroundColor: accessibility.surfaceColor,
@@ -45,19 +91,16 @@ class AppDrawer extends StatelessWidget {
                   onPressed: () => Navigator.pop(context),
                 ),
               ),
-
               const SizedBox(height: 12),
-
               CircleAvatar(
-                radius: 42,
+                radius: 43,
                 backgroundColor: const Color(0xFFF1B7E2),
-                backgroundImage:
-                    profileImagePath != null && profileImagePath!.isNotEmpty
-                    ? FileImage(File(profileImagePath!))
+                backgroundImage: imagePath.isNotEmpty
+                    ? FileImage(File(imagePath))
                     : null,
-                child: profileImagePath == null || profileImagePath!.isEmpty
+                child: imagePath.isEmpty
                     ? Text(
-                        userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
+                        cleanName[0].toUpperCase(),
                         style: const TextStyle(
                           fontSize: 30,
                           fontWeight: FontWeight.bold,
@@ -66,30 +109,48 @@ class AppDrawer extends StatelessWidget {
                       )
                     : null,
               ),
-
               const SizedBox(height: 14),
-
               Text(
-                userName,
+                cleanName,
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 22,
                   color: accessibility.textColor,
                 ),
               ),
-
               const SizedBox(height: 4),
-
               Text(
-                userEmail,
+                cleanEmail,
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   color: accessibility.mutedTextColor,
                   fontSize: 15,
                 ),
               ),
-
+              if (identification.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'ID: $identification',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: accessibility.mutedTextColor,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+              if (phone.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Tel: $phone',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: accessibility.mutedTextColor,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
-
               GestureDetector(
                 onTap: () {
                   Navigator.pop(context);
@@ -104,17 +165,13 @@ class AppDrawer extends StatelessWidget {
                   ),
                 ),
               ),
-
               const SizedBox(height: 34),
-
               _drawerItem(
-                context,
                 accessibility,
                 icon: Icons.history,
                 title: 'Historial de compras',
                 onTap: () {
                   Navigator.pop(context);
-
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -123,30 +180,24 @@ class AppDrawer extends StatelessWidget {
                   );
                 },
               ),
-
               _drawerItem(
-                context,
                 accessibility,
                 icon: Icons.settings,
-                title: 'Configuración',
+                title: 'Configuración de app',
                 onTap: () {
                   Navigator.pop(context);
-
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const SettingsScreen()),
                   );
                 },
               ),
-
               _drawerItem(
-                context,
                 accessibility,
-                icon: Icons.credit_card,
+                icon: Icons.payments,
                 title: 'Métodos de pago',
                 onTap: () {
                   Navigator.pop(context);
-
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -155,9 +206,7 @@ class AppDrawer extends StatelessWidget {
                   );
                 },
               ),
-
               _drawerItem(
-                context,
                 accessibility,
                 icon: Icons.accessibility,
                 title: 'Accesibilidad',
@@ -166,9 +215,7 @@ class AppDrawer extends StatelessWidget {
                   onAccessibility();
                 },
               ),
-
               const Spacer(),
-
               SizedBox(
                 width: double.infinity,
                 height: 54,
@@ -197,7 +244,6 @@ class AppDrawer extends StatelessWidget {
   }
 
   Widget _drawerItem(
-    BuildContext context,
     AccessibilityProvider accessibility, {
     required IconData icon,
     required String title,

@@ -6,6 +6,7 @@ import '../../ai_tryon/screens/live_makeup_camera.dart';
 import '../../ai_tryon/screens/virtual_tryon_screen.dart';
 import '../../cart/provider/cart_provider.dart';
 import '../../cart/screens/cart_screen.dart';
+import '../models/product_model.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Map<String, dynamic> product;
@@ -32,30 +33,28 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     },
   ];
 
-  String get productType {
-    final name = widget.product['name'].toString().toLowerCase();
-    final category = widget.product['category']?.toString().toLowerCase() ?? '';
+  late final Product product;
 
-    if (category == 'cuidado') {
-      return 'cuidado';
-    }
-
-    if (name.contains('labial')) {
-      return 'labial';
-    }
-
-    return 'rubor';
+  @override
+  void initState() {
+    super.initState();
+    product = Product.fromJson(widget.product);
   }
+
+  String get productType => product.tryOnType;
+
+  bool get canUseTryOn => product.canUseTryOn;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+
     if (!_announced) {
       _announced = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           context.read<AccessibilityProvider>().speak(
-            'Producto ${widget.product['name']}',
+            'Producto ${product.name}',
           );
         }
       });
@@ -68,10 +67,31 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     super.dispose();
   }
 
+  String _money(double value) => '\$${value.toStringAsFixed(0)}';
+
+  String _description() {
+    if (product.description.trim().isNotEmpty) {
+      return product.description;
+    }
+
+    if (product.isCare) {
+      return 'Producto de cuidado personal ideal para uso diario, pensado para mantener tu piel y rutina en excelente estado.';
+    }
+
+    if (product.tryOnType == 'labial') {
+      return 'Labial de alta pigmentación con acabado suave y duradero, diseñado para realzar tu belleza con un solo trazo.';
+    }
+
+    if (product.tryOnType == 'rubor') {
+      return 'Rubor suave y elegante diseñado para darle vida a tus mejillas con un acabado natural.';
+    }
+
+    return 'Producto de belleza diseñado para complementar tu rutina diaria.';
+  }
+
   @override
   Widget build(BuildContext context) {
     final accessibility = context.watch<AccessibilityProvider>();
-    final isCare = productType == 'cuidado';
 
     return Scaffold(
       backgroundColor: accessibility.appBackground,
@@ -105,50 +125,26 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Column(
-                        children: [
-                          miniImage(accessibility),
-                          const SizedBox(height: 12),
-                          miniImage(accessibility),
-                        ],
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Container(
-                          height: 250,
-                          decoration: BoxDecoration(
-                            color: accessibility.surfaceColor,
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Image.network(widget.product['imageUrl']),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  _imageSection(accessibility),
                   const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
                         child: Text(
-                          widget.product['name'],
+                          product.name,
                           style: TextStyle(
-                            fontSize: 32,
+                            fontSize: 30,
                             fontWeight: FontWeight.bold,
                             color: accessibility.textColor,
                           ),
                         ),
                       ),
+                      const SizedBox(width: 10),
                       Text(
-                        '\$${widget.product['price']}',
+                        _money(product.price),
                         style: TextStyle(
-                          fontSize: 28,
+                          fontSize: 26,
                           fontWeight: FontWeight.bold,
                           color: accessibility.primaryColor,
                         ),
@@ -157,12 +153,23 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    isCare ? 'Cuidado personal' : 'Cosmética',
+                    product.readableCategory,
                     style: TextStyle(
                       color: accessibility.mutedTextColor,
                       fontSize: 16,
                     ),
                   ),
+                  if (product.stock > 0) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      'Disponibles: ${product.stock}',
+                      style: TextStyle(
+                        color: accessibility.mutedTextColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -170,7 +177,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       const Icon(Icons.star, color: Colors.black),
                       const Icon(Icons.star, color: Colors.black),
                       const Icon(Icons.star, color: Colors.black),
-                      const Icon(Icons.star_half, color: Colors.white),
+                      Icon(Icons.star_half, color: Colors.grey.shade400),
                       const SizedBox(width: 8),
                       Text(
                         'Reseñas (20)',
@@ -185,26 +192,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   Divider(color: accessibility.mutedTextColor),
                   const SizedBox(height: 10),
                   Text(
-                    isCare
-                        ? 'Producto de cuidado personal ideal para uso diario, pensado para mantener tu piel y rutina en excelente estado.'
-                        : productType == 'labial'
-                        ? 'Labial de alta pigmentación con acabado suave y duradero, diseñado para realzar tu belleza con un solo trazo.'
-                        : 'Rubor suave y elegante diseñado para darle vida a tus mejillas con un acabado natural.',
+                    _description(),
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 15,
+                      height: 1.35,
                       color: accessibility.textColor,
                     ),
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    isCare
-                        ? 'Este producto no usa prueba virtual.'
-                        : 'Descubre tu tono perfecto con nuestra tecnología de prueba virtual IA.',
+                    canUseTryOn
+                        ? 'Disponible para prueba virtual IA. Puedes subir una selfie o usar la cámara en vivo.'
+                        : 'Este producto no usa prueba virtual. La prueba virtual solo está disponible para Labial Matte Pro y Rubor Glow.',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 15,
-                      color: accessibility.textColor,
+                      color: canUseTryOn
+                          ? accessibility.primaryColor
+                          : accessibility.mutedTextColor,
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -231,141 +237,177 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(16),
+          _bottomActions(accessibility),
+        ],
+      ),
+    );
+  }
+
+  Widget _imageSection(AccessibilityProvider accessibility) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          children: [
+            miniImage(accessibility),
+            const SizedBox(height: 12),
+            miniImage(accessibility),
+          ],
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Container(
+            height: 250,
             decoration: BoxDecoration(
-              color: accessibility.appBackground,
-              boxShadow: const [
-                BoxShadow(color: Colors.black12, blurRadius: 10),
-              ],
+              color: accessibility.surfaceColor,
+              borderRadius: BorderRadius.circular(30),
             ),
-            child: Column(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Image.network(
+                product.imageUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.image_not_supported, size: 50),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _bottomActions(AccessibilityProvider accessibility) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: accessibility.appBackground,
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)],
+      ),
+      child: Column(
+        children: [
+          if (canUseTryOn)
+            Row(
               children: [
-                if (!isCare)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            accessibility.speak('Abrir prueba virtual');
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => VirtualTryOnScreen(
-                                  productType: productType,
-                                  product: widget.product,
-                                ),
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accessibility.secondaryColor,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                            minimumSize: const Size(double.infinity, 55),
-                          ),
-                          child: const Text(
-                            'Subir selfie',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            accessibility.speak('Abrir cámara en vivo');
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => LiveMakeupCameraScreen(
-                                  productType: productType,
-                                  product: widget.product,
-                                ),
-                              ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accessibility.secondaryColor,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                            minimumSize: const Size(double.infinity, 55),
-                          ),
-                          child: const Text(
-                            'Probar producto IA',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                if (!isCare) const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
+                Expanded(
                   child: ElevatedButton(
+                    onPressed: () {
+                      accessibility.speak('Abrir prueba virtual');
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => VirtualTryOnScreen(
+                            productType: productType,
+                            product: product.toJson(),
+                          ),
+                        ),
+                      );
+                    },
                     style: ElevatedButton.styleFrom(
-                      padding: EdgeInsets.zero,
+                      backgroundColor: accessibility.secondaryColor,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30),
                       ),
+                      minimumSize: const Size(double.infinity, 55),
                     ),
-                    onPressed: () async {
-                      context.read<CartProvider>().addProduct(
-                        widget.product,
-                        productType: productType,
-                      );
-
-                      accessibility.speak('Producto agregado al carrito');
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          backgroundColor: Colors.pink,
-                          content: Text(
-                            '${widget.product['name']} agregado al carrito 🛒',
-                          ),
-                        ),
-                      );
-
-                      await Future.delayed(const Duration(milliseconds: 250));
-
-                      if (!mounted) return;
-
+                    child: const Text(
+                      'Subir selfie',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      accessibility.speak('Abrir cámara en vivo');
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const CartScreen()),
-                      );
-                    },
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(30),
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFE91E63), Color(0xFFE1A4F0)],
-                        ),
-                      ),
-                      child: Container(
-                        alignment: Alignment.center,
-                        child: const Text(
-                          'Comprar',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
+                        MaterialPageRoute(
+                          builder: (_) => LiveMakeupCameraScreen(
+                            productType: productType,
+                            product: product.toJson(),
                           ),
                         ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accessibility.secondaryColor,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      minimumSize: const Size(double.infinity, 55),
+                    ),
+                    child: const Text(
+                      'Cámara en vivo',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
                 ),
               ],
+            ),
+          if (canUseTryOn) const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 55,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                padding: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
+              onPressed: () async {
+                context.read<CartProvider>().addProduct(
+                  product.toJson(),
+                  productType: product.tryOnType.isNotEmpty
+                      ? product.tryOnType
+                      : product.category,
+                );
+
+                accessibility.speak('Producto agregado al carrito');
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: Colors.pink,
+                    content: Text('${product.name} agregado al carrito 🛒'),
+                  ),
+                );
+
+                await Future.delayed(const Duration(milliseconds: 250));
+
+                if (!mounted) return;
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CartScreen()),
+                );
+              },
+              child: Ink(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(30),
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFE91E63), Color(0xFFE1A4F0)],
+                  ),
+                ),
+                child: Container(
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'Comprar',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ],
@@ -383,7 +425,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),
-        child: Image.network(widget.product['imageUrl']),
+        child: Image.network(
+          product.imageUrl,
+          errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported),
+        ),
       ),
     );
   }
@@ -509,15 +554,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 ),
               ),
               onPressed: () {
-                if (reviewController.text.isNotEmpty) {
+                if (reviewController.text.trim().isNotEmpty) {
                   setState(() {
                     reviews.add({
                       'name': 'Tú',
-                      'comment': reviewController.text,
+                      'comment': reviewController.text.trim(),
                       'stars': selectedStars,
                       'image': 'https://randomuser.me/api/portraits/men/32.jpg',
                     });
                   });
+
                   reviewController.clear();
                   accessibility.speak('Reseña publicada');
                 }

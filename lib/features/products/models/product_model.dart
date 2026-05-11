@@ -35,6 +35,36 @@ class Product {
     );
   }
 
+  bool get isCosmetic => category.toLowerCase().trim() == 'cosmetica';
+
+  bool get isCare => category.toLowerCase().trim() == 'cuidado';
+
+  bool get isFirstLipstick {
+    final cleanName = name.toLowerCase().trim();
+    return id == 1 || cleanName.contains('labial matte pro');
+  }
+
+  bool get isFirstBlush {
+    final cleanName = name.toLowerCase().trim();
+    return id == 2 || cleanName.contains('rubor glow');
+  }
+
+  bool get canUseTryOn {
+    return isFirstLipstick || isFirstBlush;
+  }
+
+  String get tryOnType {
+    if (isFirstLipstick) return 'labial';
+    if (isFirstBlush) return 'rubor';
+    return '';
+  }
+
+  String get readableCategory {
+    if (isCare) return 'Cuidado personal';
+    if (isCosmetic) return 'Cosmética';
+    return category;
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -46,6 +76,8 @@ class Product {
       'brand': brand,
       'stock': stock,
       'active': active,
+      'canUseTryOn': canUseTryOn,
+      'tryOnType': tryOnType,
     };
   }
 
@@ -69,6 +101,8 @@ class Product {
     if (value is bool) return value;
     if (value is int) return value == 1;
     if (value is num) return value.toInt() == 1;
-    return value.toString() == '1' || value.toString().toLowerCase() == 'true';
+
+    final clean = value.toString().toLowerCase().trim();
+    return clean == '1' || clean == 'true';
   }
 }
