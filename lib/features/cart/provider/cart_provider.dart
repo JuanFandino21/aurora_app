@@ -23,6 +23,14 @@ class CartItem {
 
   double get subtotal => price * quantity;
 
+  String get toneHex {
+    if (tone == null) return '';
+    final value = tone!.value.toRadixString(16).padLeft(8, '0');
+    return '#$value';
+  }
+
+  String get cartKey => '$id-${productType.toLowerCase()}-$toneHex';
+
   Map<String, dynamic> toOrderJson() {
     return {
       'id': id,
@@ -31,7 +39,8 @@ class CartItem {
       'imageUrl': imageUrl,
       'quantity': quantity,
       'productType': productType,
-      'tone': tone == null ? null : tone!.toARGB32(),
+      'selectedTone': toneHex,
+      'tone': toneHex,
     };
   }
 }
@@ -53,17 +62,21 @@ class CartProvider extends ChangeNotifier {
 
   void addProduct(dynamic product, {Color? tone, String? productType}) {
     final normalized = _normalizeProduct(product);
-
     if (normalized == null) return;
 
-    final id = normalized.id;
-    final type = productType ?? normalized.category;
+    final type = (productType?.trim().isNotEmpty ?? false)
+        ? productType!.trim().toLowerCase()
+        : normalized.category.trim().toLowerCase();
+
+    final toneHex = tone == null
+        ? ''
+        : '#${tone.value.toRadixString(16).padLeft(8, '0')}';
 
     final index = _items.indexWhere(
       (item) =>
-          item.id == id &&
-          item.productType == type &&
-          item.tone?.toARGB32() == tone?.toARGB32(),
+          item.id == normalized.id &&
+          item.productType.toLowerCase() == type &&
+          item.toneHex == toneHex,
     );
 
     if (index >= 0) {
@@ -90,6 +103,36 @@ class CartProvider extends ChangeNotifier {
 
   void addToCart(Map<String, dynamic> product) {
     addProduct(product);
+  }
+
+  void increaseItem(CartItem item) {
+    final index = _items.indexWhere(
+      (cartItem) => cartItem.cartKey == item.cartKey,
+    );
+    if (index < 0) return;
+
+    _items[index].quantity++;
+    notifyListeners();
+  }
+
+  void decreaseItem(CartItem item) {
+    final index = _items.indexWhere(
+      (cartItem) => cartItem.cartKey == item.cartKey,
+    );
+    if (index < 0) return;
+
+    if (_items[index].quantity > 1) {
+      _items[index].quantity--;
+    } else {
+      _items.removeAt(index);
+    }
+
+    notifyListeners();
+  }
+
+  void removeItem(CartItem item) {
+    _items.removeWhere((cartItem) => cartItem.cartKey == item.cartKey);
+    notifyListeners();
   }
 
   void increase(int productId) {

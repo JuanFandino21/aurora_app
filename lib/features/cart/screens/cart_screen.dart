@@ -10,6 +10,18 @@ class CartScreen extends StatelessWidget {
 
   String _money(double value) => '\$${value.toStringAsFixed(0)}';
 
+  String _typeLabel(String value) {
+    final type = value.toLowerCase();
+
+    if (type == 'labial') return 'Labial';
+    if (type == 'rubor') return 'Rubor';
+    if (type == 'base') return 'Base';
+    if (type == 'cosmetica') return 'Cosmética';
+    if (type == 'cuidado') return 'Cuidado personal';
+
+    return value.isEmpty ? 'Producto' : value;
+  }
+
   @override
   Widget build(BuildContext context) {
     final cart = context.watch<CartProvider>();
@@ -87,14 +99,51 @@ class CartScreen extends StatelessWidget {
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    'Tipo: ${_typeLabel(item.productType)}',
+                                    style: TextStyle(
+                                      color: accessibility.mutedTextColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (item.tone != null) ...[
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Text(
+                                          'Tono:',
+                                          style: TextStyle(
+                                            color: accessibility.mutedTextColor,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          width: 22,
+                                          height: 22,
+                                          decoration: BoxDecoration(
+                                            color: item.tone,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: accessibility.textColor
+                                                  .withOpacity(0.35),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                   const SizedBox(height: 8),
                                   Row(
                                     children: [
                                       IconButton(
                                         onPressed: () {
-                                          context.read<CartProvider>().decrease(
-                                            item.id,
-                                          );
+                                          context
+                                              .read<CartProvider>()
+                                              .decreaseItem(item);
                                         },
                                         icon: Icon(
                                           Icons.remove_circle_outline,
@@ -110,9 +159,9 @@ class CartScreen extends StatelessWidget {
                                       ),
                                       IconButton(
                                         onPressed: () {
-                                          context.read<CartProvider>().increase(
-                                            item.id,
-                                          );
+                                          context
+                                              .read<CartProvider>()
+                                              .increaseItem(item);
                                         },
                                         icon: Icon(
                                           Icons.add_circle_outline,
@@ -126,9 +175,7 @@ class CartScreen extends StatelessWidget {
                             ),
                             IconButton(
                               onPressed: () {
-                                context.read<CartProvider>().removeProduct(
-                                  item.id,
-                                );
+                                context.read<CartProvider>().removeItem(item);
                               },
                               icon: const Icon(Icons.delete, color: Colors.red),
                             ),

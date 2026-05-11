@@ -23,16 +23,29 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   String _money(double value) => '\$${value.toStringAsFixed(0)}';
 
+  int? _getUserId(AuthProvider auth) {
+    final raw = auth.user?['id'] ?? auth.user?['uid'] ?? auth.user?['userId'];
+    if (raw == null) return null;
+
+    final id = int.tryParse(raw.toString());
+    if (id == null || id <= 0) return null;
+
+    return id;
+  }
+
   Future<void> _confirmOrder() async {
     final auth = context.read<AuthProvider>();
     final cart = context.read<CartProvider>();
 
-    final userId =
-        auth.user?['id']?.toString() ?? auth.user?['uid']?.toString() ?? '';
+    final userId = _getUserId(auth);
 
-    if (userId.isEmpty) {
+    if (userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay usuario autenticado')),
+        const SnackBar(
+          content: Text(
+            'No hay usuario autenticado. Cierra sesión e inicia de nuevo.',
+          ),
+        ),
       );
       return;
     }
@@ -53,7 +66,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         Uri.parse('${ApiConfig.baseUrl}/orders'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'userId': int.tryParse(userId) ?? userId,
+          'userId': userId,
           'paymentMethod': paymentMethod,
           'items': cart.toOrderItems(),
         }),
@@ -144,24 +157,56 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         color: accessibility.surfaceColor,
                         borderRadius: BorderRadius.circular(18),
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Text(
-                              '${item.name} x${item.quantity}',
-                              style: TextStyle(
-                                color: accessibility.textColor,
-                                fontWeight: FontWeight.w600,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${item.name} x${item.quantity}',
+                                  style: TextStyle(
+                                    color: accessibility.textColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
-                            ),
+                              Text(
+                                _money(item.subtotal),
+                                style: TextStyle(
+                                  color: accessibility.primaryColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
                           ),
-                          Text(
-                            _money(item.subtotal),
-                            style: TextStyle(
-                              color: accessibility.primaryColor,
-                              fontWeight: FontWeight.bold,
+                          if (item.tone != null) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Text(
+                                  'Tono seleccionado',
+                                  style: TextStyle(
+                                    color: accessibility.mutedTextColor,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  width: 20,
+                                  height: 20,
+                                  decoration: BoxDecoration(
+                                    color: item.tone,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: accessibility.textColor
+                                          .withOpacity(0.25),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),
@@ -242,10 +287,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       value: value,
       groupValue: paymentMethod,
       activeColor: accessibility.primaryColor,
-      title: Text(value, style: TextStyle(color: accessibility.textColor)),
+      title: Text(
+        value,
+        style: TextStyle(
+          color: accessibility.textColor,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       onChanged: (selected) {
         if (selected == null) return;
-
         setState(() {
           paymentMethod = selected;
         });

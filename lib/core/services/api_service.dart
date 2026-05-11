@@ -1,42 +1,44 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../constants/api_config.dart';
+
 class ApiService {
-  static const String baseUrl = 'http://10.0.2.2:4000';
+  static String get baseUrl => ApiConfig.baseUrl;
 
   static Map<String, String> get headers => {
         'Content-Type': 'application/json',
       };
 
-  // LOGIN
   static Future<Map<String, dynamic>?> login(
     String email,
     String password,
   ) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/api/auth/login'),
+        Uri.parse('$baseUrl/auth/login'),
         headers: headers,
         body: jsonEncode({
-          'email': email,
-          'password': password,
+          'email': email.trim(),
+          'password': password.trim(),
         }),
       );
 
-      print(response.body);
+      debugPrint(response.body);
 
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
 
       return null;
     } catch (e) {
-      print(e);
+      debugPrint('LOGIN API ERROR: $e');
       return null;
     }
   }
 
-  // REGISTER
   static Future<Map<String, dynamic>?> register(
     String name,
     String email,
@@ -44,43 +46,47 @@ class ApiService {
   ) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/api/auth/register'),
+        Uri.parse('$baseUrl/auth/register'),
         headers: headers,
         body: jsonEncode({
-          'name': name,
-          'email': email,
-          'password': password,
+          'name': name.trim(),
+          'email': email.trim(),
+          'password': password.trim(),
+          'phone': '',
         }),
       );
 
-      print(response.body);
+      debugPrint(response.body);
 
-      if (response.statusCode == 200 ||
-          response.statusCode == 201) {
-        return jsonDecode(response.body);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
 
       return null;
     } catch (e) {
-      print(e);
+      debugPrint('REGISTER API ERROR: $e');
       return null;
     }
   }
 
-  // PRODUCTS
   static Future<List<dynamic>> getProducts() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/api/products'),
+        Uri.parse('$baseUrl/products'),
+        headers: headers,
       );
 
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        final data = jsonDecode(response.body);
+
+        if (data is Map<String, dynamic> && data['ok'] == true) {
+          return List<dynamic>.from(data['products'] ?? []);
+        }
       }
 
       return [];
     } catch (e) {
-      print(e);
+      debugPrint('PRODUCTS API ERROR: $e');
       return [];
     }
   }

@@ -18,6 +18,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool obscure = true;
 
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email.trim());
+  }
+
+  bool _isValidPassword(String password) {
+    final cleanPassword = password.trim();
+    return cleanPassword.length >= 6 && cleanPassword.length <= 60;
+  }
+
   @override
   void dispose() {
     emailController.dispose();
@@ -26,13 +35,27 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    final email = emailController.text.trim();
+    final email = emailController.text.trim().toLowerCase();
     final password = passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ingresa correo y contraseña')),
+      );
+      return;
+    }
+
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ingresa un correo electrónico válido')),
+      );
+      return;
+    }
+
+    if (!_isValidPassword(password)) {
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Ingresa correo y contraseña'),
+          content: Text('La contraseña debe tener entre 6 y 60 caracteres'),
         ),
       );
       return;
@@ -47,9 +70,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (ok) {
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(
-          builder: (_) => const HomeScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
         (route) => false,
       );
     } else {
@@ -71,16 +92,14 @@ class _LoginScreenState extends State<LoginScreen> {
         child: SingleChildScrollView(
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              minHeight: MediaQuery.of(context).size.height -
+              minHeight:
+                  MediaQuery.of(context).size.height -
                   MediaQuery.of(context).padding.top,
             ),
             child: Column(
               children: [
                 const SizedBox(height: 70),
-                Image.asset(
-                  'assets/logo.png',
-                  height: 130,
-                ),
+                Image.asset('assets/logo.png', height: 130),
                 const SizedBox(height: 190),
                 Container(
                   width: double.infinity,
@@ -158,6 +177,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextField(
                         controller: emailController,
                         keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
                           hintText: 'Correo Electrónico',
                           border: UnderlineInputBorder(),
@@ -167,14 +187,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextField(
                         controller: passwordController,
                         obscureText: obscure,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) {
+                          if (!auth.isLoading) {
+                            _login();
+                          }
+                        },
                         decoration: InputDecoration(
                           hintText: 'Contraseña',
                           border: const UnderlineInputBorder(),
                           suffixIcon: IconButton(
                             icon: Icon(
-                              obscure
-                                  ? Icons.visibility
-                                  : Icons.visibility_off,
+                              obscure ? Icons.visibility : Icons.visibility_off,
                             ),
                             onPressed: () {
                               setState(() {
@@ -210,14 +234,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 18),
-                      const Text(
-                        '',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.black54,
-                          fontSize: 13,
-                        ),
-                      ),
                     ],
                   ),
                 ),

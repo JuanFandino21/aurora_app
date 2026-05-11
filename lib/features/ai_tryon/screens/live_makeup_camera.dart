@@ -1,5 +1,5 @@
+import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
@@ -32,9 +32,13 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
   bool _ready = false;
   bool _busy = false;
   bool _announced = false;
+  bool _cameraError = false;
+
+  String _status = 'Iniciando cámara...';
 
   List<Face> _faces = [];
   Size? _imageSize;
+  CameraLensDirection _cameraLensDirection = CameraLensDirection.front;
 
   int _selectedTone = 0;
 
@@ -50,10 +54,14 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
     Color(0xFFE75480),
   ];
 
-  List<Color> get _tones =>
-      widget.productType == 'labial' ? _labialTones : _blushTones;
+  List<Color> get _tones {
+    final type = widget.productType.toLowerCase();
+    return type == 'labial' ? _labialTones : _blushTones;
+  }
 
   Color get _currentTone => _tones[_selectedTone];
+
+  bool get _isLipstick => widget.productType.toLowerCase() == 'labial';
 
   @override
   void initState() {
@@ -63,7 +71,8 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
       options: FaceDetectorOptions(
         enableContours: true,
         enableLandmarks: true,
-        performanceMode: FaceDetectorMode.accurate,
+        performanceMode: FaceDetectorMode.fast,
+        minFaceSize: 0.12,
       ),
     );
 
@@ -73,6 +82,7 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+
     if (!_announced) {
       _announced = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -84,26 +94,53 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
   }
 
   Future<void> _initCamera() async {
-    final cameras = await availableCameras();
-    final front = cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.front,
-    );
+    try {
+      final cameras = await availableCameras();
 
-    _controller = CameraController(
-      front,
-      ResolutionPreset.medium,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.yuv420,
-    );
+      if (cameras.isEmpty) {
+        setState(() {
+          _cameraError = true;
+          _status = 'No se encontró cámara disponible';
+        });
+        return;
+      }
 
-    await _controller!.initialize();
-    await _controller!.startImageStream(_processImage);
+      final selectedCamera = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
 
-    if (!mounted) return;
+      _cameraLensDirection = selectedCamera.lensDirection;
 
-    setState(() {
-      _ready = true;
-    });
+      _controller = CameraController(
+        selectedCamera,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.nv21
+            : ImageFormatGroup.bgra8888,
+      );
+
+      await _controller!.initialize();
+
+      await _controller!.startImageStream(_processImage);
+
+      if (!mounted) return;
+
+      setState(() {
+        _ready = true;
+        _cameraError = false;
+        _status = 'Buscando rostro...';
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _cameraError = true;
+        _ready = false;
+        _status = 'No fue posible iniciar la cámara';
+      });
+    }
   }
 
   Future<void> _processImage(CameraImage image) async {
@@ -112,9 +149,10 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
     _busy = true;
 
     try {
-      final inputImage = _inputImageFromCamera(image);
+      final inputImage = _inputImageFromCameraImage(image);
 
       if (inputImage == null) {
+        _busy = false;
         return;
       }
 
@@ -125,19 +163,29 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
       setState(() {
         _faces = faces;
         _imageSize = Size(image.width.toDouble(), image.height.toDouble());
+        _status = faces.isEmpty
+            ? 'Buscando rostro...'
+            : 'Rostro detectado: ${faces.length}';
       });
     } catch (_) {
+      if (mounted) {
+        setState(() {
+          _status = 'Ajusta tu rostro frente a la cámara';
+        });
+      }
     } finally {
       _busy = false;
     }
   }
 
-  InputImage? _inputImageFromCamera(CameraImage image) {
-    final camera = _controller;
-    if (camera == null) return null;
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    final controller = _controller;
+    if (controller == null) return null;
+
+    final camera = controller.description;
 
     final rotation = InputImageRotationValue.fromRawValue(
-      camera.description.sensorOrientation,
+      camera.sensorOrientation,
     );
 
     if (rotation == null) return null;
@@ -146,42 +194,44 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
 
     if (format == null) return null;
 
-    final bytes = BytesBuilder();
-    for (final plane in image.planes) {
-      bytes.add(plane.bytes);
+    if (Platform.isAndroid && format != InputImageFormat.nv21) {
+      return null;
     }
 
+    if (Platform.isIOS && format != InputImageFormat.bgra8888) {
+      return null;
+    }
+
+    if (image.planes.isEmpty) return null;
+
+    final plane = image.planes.first;
+
     return InputImage.fromBytes(
-      bytes: bytes.toBytes(),
+      bytes: plane.bytes,
       metadata: InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
         rotation: rotation,
         format: format,
-        bytesPerRow: image.planes.first.bytesPerRow,
+        bytesPerRow: plane.bytesPerRow,
       ),
     );
   }
 
-  @override
-  void dispose() {
-    _controller?.dispose();
-    _faceDetector.close();
-    super.dispose();
-  }
-
   Future<void> _confirmTone() async {
     context.read<CartProvider>().addProduct(
-          widget.product,
-          tone: _currentTone,
-          productType: widget.productType,
-        );
+      widget.product,
+      tone: _currentTone,
+      productType: widget.productType,
+    );
 
-    context.read<AccessibilityProvider>().speak('Tono confirmado y agregado al carrito');
+    context.read<AccessibilityProvider>().speak(
+      'Tono confirmado y agregado al carrito',
+    );
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: Colors.pink,
-        content: Text('${widget.product['name']} agregado al carrito 💄'),
+        content: Text('${widget.product['name']} agregado al carrito'),
       ),
     );
 
@@ -196,18 +246,38 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
   }
 
   @override
+  void dispose() {
+    _controller?.stopImageStream().catchError((_) {});
+    _controller?.dispose();
+    _faceDetector.close();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final accessibility = context.watch<AccessibilityProvider>();
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: !_ready
+      body: _cameraError
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _status,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            )
+          : !_ready || _controller == null
           ? const Center(child: CircularProgressIndicator())
           : Stack(
               children: [
-                Positioned.fill(
-                  child: CameraPreview(_controller!),
-                ),
+                Positioned.fill(child: CameraPreview(_controller!)),
                 Positioned.fill(
                   child: CustomPaint(
                     painter: LiveMakeupPainter(
@@ -215,12 +285,13 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
                       imageSize: _imageSize,
                       tone: _currentTone,
                       productType: widget.productType,
+                      lensDirection: _cameraLensDirection,
                     ),
                   ),
                 ),
                 Positioned(
-                  top: 50,
-                  left: 20,
+                  top: 48,
+                  left: 16,
                   child: IconButton(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(
@@ -231,50 +302,77 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: 40,
+                  top: 100,
+                  left: 20,
+                  right: 20,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.60),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Text(
+                      _status,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 38,
                   left: 0,
                   right: 0,
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(_tones.length, (index) {
-                          return GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _selectedTone = index;
-                              });
-                              accessibility.speak('Tono seleccionado');
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 8),
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _tones[index],
-                                border: Border.all(
-                                  color: _selectedTone == index
-                                      ? Colors.white
-                                      : Colors.transparent,
-                                  width: 3,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.45),
+                          borderRadius: BorderRadius.circular(28),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: List.generate(_tones.length, (index) {
+                            return GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedTone = index;
+                                });
+
+                                accessibility.speak('Tono seleccionado');
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _tones[index],
+                                  border: Border.all(
+                                    color: _selectedTone == index
+                                        ? Colors.white
+                                        : Colors.transparent,
+                                    width: 3,
+                                  ),
                                 ),
                               ),
-                            ),
-                          );
-                        }),
-                      ),
-                      const SizedBox(height: 18),
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.black,
-                          border: Border.all(color: Colors.white, width: 5),
+                            );
+                          }),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 18),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: SizedBox(
@@ -288,9 +386,11 @@ class _LiveMakeupCameraScreenState extends State<LiveMakeupCameraScreen> {
                                 borderRadius: BorderRadius.circular(30),
                               ),
                             ),
-                            child: const Text(
-                              'Confirmar tono',
-                              style: TextStyle(
+                            child: Text(
+                              _faces.isEmpty
+                                  ? 'Agregar tono al carrito'
+                                  : 'Confirmar tono',
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -312,48 +412,62 @@ class LiveMakeupPainter extends CustomPainter {
   final Size? imageSize;
   final Color tone;
   final String productType;
+  final CameraLensDirection lensDirection;
 
   LiveMakeupPainter({
     required this.faces,
     required this.imageSize,
     required this.tone,
     required this.productType,
+    required this.lensDirection,
   });
+
+  bool get _isLipstick => productType.toLowerCase() == 'labial';
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (imageSize == null) return;
-
-    final sx = size.width / imageSize!.width;
-    final sy = size.height / imageSize!.height;
-
-    Offset map(Offset p) {
-      return Offset(size.width - (p.dx * sx), p.dy * sy);
-    }
+    if (imageSize == null || faces.isEmpty) return;
 
     for (final face in faces) {
-      if (productType == 'labial') {
-        final points = _lipPoints(face, map);
-        if (points.length < 10) continue;
-
-        final path = _smooth(points);
-
-        final shadow = Paint()
-          ..color = tone.withOpacity(0.25)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
-
-        canvas.drawPath(path, shadow);
-
-        final fill = Paint()..color = tone.withOpacity(0.68);
-        canvas.drawPath(path, fill);
+      if (_isLipstick) {
+        _paintLips(canvas, size, face);
       } else {
-        _blush(face, canvas, map);
+        _paintBlush(canvas, size, face);
       }
     }
   }
 
-  List<Offset> _lipPoints(Face face, Offset Function(Offset) map) {
-    final contours = [
+  Offset _mapPoint(Offset point, Size canvasSize) {
+    final imageW = imageSize!.width;
+    final imageH = imageSize!.height;
+
+    final scaleX = canvasSize.width / imageW;
+    final scaleY = canvasSize.height / imageH;
+
+    double x = point.dx * scaleX;
+    double y = point.dy * scaleY;
+
+    if (lensDirection == CameraLensDirection.front) {
+      x = canvasSize.width - x;
+    }
+
+    return Offset(x, y);
+  }
+
+  Rect _mapRect(Rect rect, Size canvasSize) {
+    final topLeft = _mapPoint(rect.topLeft, canvasSize);
+    final bottomRight = _mapPoint(rect.bottomRight, canvasSize);
+
+    return Rect.fromLTRB(
+      math.min(topLeft.dx, bottomRight.dx),
+      math.min(topLeft.dy, bottomRight.dy),
+      math.max(topLeft.dx, bottomRight.dx),
+      math.max(topLeft.dy, bottomRight.dy),
+    );
+  }
+
+  void _paintLips(Canvas canvas, Size size, Face face) {
+    final lipTypes = [
       FaceContourType.upperLipTop,
       FaceContourType.upperLipBottom,
       FaceContourType.lowerLipTop,
@@ -362,89 +476,102 @@ class LiveMakeupPainter extends CustomPainter {
 
     final points = <Offset>[];
 
-    for (final type in contours) {
+    for (final type in lipTypes) {
       final contour = face.contours[type];
       if (contour == null) continue;
 
-      points.addAll(
-        contour.points.map(
-          (e) => map(Offset(e.x.toDouble(), e.y.toDouble())),
-        ),
-      );
+      for (final point in contour.points) {
+        points.add(
+          _mapPoint(Offset(point.x.toDouble(), point.y.toDouble()), size),
+        );
+      }
     }
 
-    return points;
+    if (points.length < 8) {
+      final box = _mapRect(face.boundingBox, size);
+
+      final fallback = Rect.fromCenter(
+        center: Offset(box.center.dx, box.top + box.height * 0.67),
+        width: box.width * 0.34,
+        height: box.height * 0.09,
+      );
+
+      final paint = Paint()
+        ..color = tone.withOpacity(0.58)
+        ..style = PaintingStyle.fill
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+
+      canvas.drawOval(fallback, paint);
+      return;
+    }
+
+    final path = _smoothClosedPath(points);
+
+    final shadow = Paint()
+      ..color = tone.withOpacity(0.25)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
+
+    canvas.drawPath(path, shadow);
+
+    final fill = Paint()
+      ..color = tone.withOpacity(0.68)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawPath(path, fill);
   }
 
-  void _blush(Face face, Canvas canvas, Offset Function(Offset) map) {
-    final bbox = face.boundingBox;
+  void _paintBlush(Canvas canvas, Size size, Face face) {
+    final box = _mapRect(face.boundingBox, size);
 
-    final leftLandmark = face.landmarks[FaceLandmarkType.leftCheek]?.position;
-    final rightLandmark = face.landmarks[FaceLandmarkType.rightCheek]?.position;
+    final leftCenter = Offset(
+      box.left + box.width * 0.30,
+      box.top + box.height * 0.58,
+    );
 
-    final left = leftLandmark != null
-        ? map(Offset(
-            leftLandmark.x.toDouble(),
-            leftLandmark.y.toDouble(),
-          ))
-        : map(Offset(
-            bbox.left + bbox.width * 0.30,
-            bbox.top + bbox.height * 0.58,
-          ));
+    final rightCenter = Offset(
+      box.left + box.width * 0.70,
+      box.top + box.height * 0.58,
+    );
 
-    final right = rightLandmark != null
-        ? map(Offset(
-            rightLandmark.x.toDouble(),
-            rightLandmark.y.toDouble(),
-          ))
-        : map(Offset(
-            bbox.left + bbox.width * 0.70,
-            bbox.top + bbox.height * 0.58,
-          ));
+    final radius = math.max(box.width, box.height) * 0.12;
 
-    final radius = math.max(bbox.width, bbox.height) * 0.18;
-
-    for (final center in [left, right]) {
+    for (final center in [leftCenter, rightCenter]) {
       final paint = Paint()
         ..shader = ui.Gradient.radial(
           center,
           radius,
-          [
-            tone.withOpacity(0.36),
-            tone.withOpacity(0.16),
-            Colors.transparent,
-          ],
+          [tone.withOpacity(0.40), tone.withOpacity(0.18), Colors.transparent],
           const [0.0, 0.55, 1.0],
         )
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9);
 
       canvas.drawCircle(center, radius, paint);
     }
   }
 
-  Path _smooth(List<Offset> points) {
+  Path _smoothClosedPath(List<Offset> points) {
     final center = Offset(
-      points.map((e) => e.dx).reduce((a, b) => a + b) / points.length,
-      points.map((e) => e.dy).reduce((a, b) => a + b) / points.length,
+      points.map((p) => p.dx).reduce((a, b) => a + b) / points.length,
+      points.map((p) => p.dy).reduce((a, b) => a + b) / points.length,
     );
 
-    final sorted = [...points]
-      ..sort((a, b) {
-        final aa = math.atan2(a.dy - center.dy, a.dx - center.dx);
-        final bb = math.atan2(b.dy - center.dy, b.dx - center.dx);
-        return aa.compareTo(bb);
-      });
+    points.sort((a, b) {
+      final angleA = math.atan2(a.dy - center.dy, a.dx - center.dx);
+      final angleB = math.atan2(b.dy - center.dy, b.dx - center.dx);
+      return angleA.compareTo(angleB);
+    });
 
-    final path = Path();
-    path.moveTo(sorted.first.dx, sorted.first.dy);
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
 
-    for (int i = 0; i < sorted.length; i++) {
-      final current = sorted[i];
-      final next = sorted[(i + 1) % sorted.length];
+    for (int i = 0; i < points.length; i++) {
+      final current = points[i];
+      final next = points[(i + 1) % points.length];
+
       final mid = Offset(
         (current.dx + next.dx) / 2,
         (current.dy + next.dy) / 2,
       );
+
       path.quadraticBezierTo(current.dx, current.dy, mid.dx, mid.dy);
     }
 
@@ -453,5 +580,10 @@ class LiveMakeupPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant LiveMakeupPainter oldDelegate) {
+    return oldDelegate.faces != faces ||
+        oldDelegate.tone != tone ||
+        oldDelegate.productType != productType ||
+        oldDelegate.imageSize != imageSize;
+  }
 }
