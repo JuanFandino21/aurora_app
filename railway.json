@@ -5,7 +5,7 @@
         "buildCommand": "npm install"
     },
     "deploy": {
-        "startCommand": "node aurora_api/server.js",
+        "startCommand": "node server.js",
         "restartPolicyType": "ON_FAILURE",
         "restartPolicyMaxRetries": 10
     }
